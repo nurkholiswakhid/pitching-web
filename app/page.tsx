@@ -75,7 +75,6 @@ const PDF_TITLE = 'Proposal Penawaran';
 // ─── Main Component ───────────────────────────────────────────────────────────
 
 export default function PDFViewerPage() {
-  // zoom: 'page' = fit full page, 'page-width' = fit width, or number string '75'/'100'/'125' etc.
   const [zoom, setZoom]               = useState<string>('page');
   const [rotation, setRotation]       = useState(0);
   const [currentPage, setCurrentPage] = useState(1);
@@ -83,19 +82,29 @@ export default function PDFViewerPage() {
   const [isFullscreen, setIsFullscreen] = useState(false);
   const [toolbarVisible, setToolbarVisible] = useState(true);
   const [pageInputVal, setPageInputVal]     = useState('1');
+  // Deteksi mobile (viewport width < 768px)
+  const [isMobile, setIsMobile]       = useState(false);
 
-  const viewerRef      = useRef<HTMLDivElement>(null);
-  const iframeRef      = useRef<HTMLIFrameElement>(null);
+  const viewerRef       = useRef<HTMLDivElement>(null);
+  const iframeRef       = useRef<HTMLIFrameElement>(null);
   const toolbarTimerRef = useRef<ReturnType<typeof setTimeout> | null>(null);
+
+  // ── Deteksi ukuran layar
+  useEffect(() => {
+    const checkMobile = () => setIsMobile(window.innerWidth < 768);
+    checkMobile();
+    window.addEventListener('resize', checkMobile);
+    return () => window.removeEventListener('resize', checkMobile);
+  }, []);
 
   // Sync page input
   useEffect(() => { setPageInputVal(String(currentPage)); }, [currentPage]);
 
-  // ── Keyboard shortcuts
+  // ── Keyboard shortcuts (desktop only)
   useEffect(() => {
     const handler = (e: KeyboardEvent) => {
       const tag = (e.target as HTMLElement).tagName;
-      if (tag === 'INPUT') return;
+      if (tag === 'INPUT' || tag === 'SELECT') return;
       if (e.key === 'ArrowRight' || e.key === 'ArrowDown') setCurrentPage(p => Math.min(p + 1, totalPages));
       if (e.key === 'ArrowLeft'  || e.key === 'ArrowUp')   setCurrentPage(p => Math.max(p - 1, 1));
       if (e.key === 'f' || e.key === 'F') toggleFullscreen();
@@ -125,9 +134,10 @@ export default function PDFViewerPage() {
       toolbarTimerRef.current = setTimeout(() => setToolbarVisible(false), 3500);
     };
     resetTimer();
-    window.addEventListener('mousemove', resetTimer);
+    const events = ['mousemove', 'touchstart'];
+    events.forEach(ev => window.addEventListener(ev, resetTimer));
     return () => {
-      window.removeEventListener('mousemove', resetTimer);
+      events.forEach(ev => window.removeEventListener(ev, resetTimer));
       if (toolbarTimerRef.current) clearTimeout(toolbarTimerRef.current);
     };
   }, [isFullscreen]);
@@ -168,7 +178,7 @@ export default function PDFViewerPage() {
     }
   };
 
-  // Build iframe src — use #view=Fit for 'page' mode, #view=FitH for 'page-width', otherwise numeric zoom
+  // Build PDF src — view=Fit → satu halaman penuh di semua layar
   const buildPdfHash = () => {
     const base = `page=${currentPage}&toolbar=0&navpanes=0&scrollbar=1`;
     if (zoom === 'page')       return `${base}&view=Fit`;
@@ -177,99 +187,126 @@ export default function PDFViewerPage() {
   };
   const pdfSrc = `${PDF_URL}#${buildPdfHash()}`;
 
+  // Tinggi toolbar (digunakan untuk kalkulasi tinggi area PDF)
+  const TOOLBAR_H = isMobile ? 48 : 54;
+
   return (
-    <div
-      ref={viewerRef}
-      style={{
-        width: '100vw',
-        height: '100vh',
-        display: 'flex',
-        flexDirection: 'column',
-        background: '#0d0f14',
-        position: 'relative',
-        overflow: 'hidden',
-      }}
-    >
-      {/* Ambient background glow */}
-      <div style={{
-        position: 'absolute', inset: 0, pointerEvents: 'none', zIndex: 0,
-        background: `
-          radial-gradient(ellipse 70% 40% at 15% 5%, rgba(99,102,241,0.08) 0%, transparent 55%),
-          radial-gradient(ellipse 50% 35% at 85% 95%, rgba(139,92,246,0.06) 0%, transparent 55%)
-        `,
-      }} />
+    <>
+      {/* ── CSS: dvh fix untuk mobile ── */}
+      <style>{`
+        #pdf-root {
+          position: fixed;
+          inset: 0;
+          display: flex;
+          flex-direction: column;
+          background: #0d0f14;
+          /* dvh: dynamic viewport height — memperhitungkan address bar browser mobile */
+          height: 100dvh;
+          width: 100dvw;
+          overflow: hidden;
+        }
+        #pdf-toolbar {
+          flex-shrink: 0;
+          display: flex;
+          align-items: center;
+          gap: 8px;
+          padding: 0 12px;
+          height: ${TOOLBAR_H}px;
+          background: rgba(10,12,18,0.95);
+          backdrop-filter: blur(28px);
+          -webkit-backdrop-filter: blur(28px);
+          border-bottom: 1px solid rgba(255,255,255,0.07);
+          overflow: hidden;
+          /* Sembunyikan saat fullscreen + tidak terlihat */
+          transition: opacity 0.3s ease, transform 0.3s ease;
+          z-index: 200;
+        }
+        #pdf-main {
+          flex: 1;
+          min-height: 0;     /* PENTING: agar flex child tidak meluber */
+          position: relative;
+          overflow: hidden;
+          background: #111318;
+        }
+        #pdf-iframe {
+          position: absolute;
+          inset: 0;
+          width: 100%;
+          height: 100%;
+          border: none;
+          display: block;
+        }
+        /* Mobile: sembunyikan elemen yang tidak penting */
+        @media (max-width: 640px) {
+          .hide-mobile { display: none !important; }
+          .compact-mobile { gap: 4px !important; padding: 0 8px !important; }
+          #pdf-logo-text { display: none !important; }
+        }
+        @media (max-width: 480px) {
+          .hide-sm { display: none !important; }
+        }
+      `}</style>
 
-      {/* ── Toolbar ── */}
-      <header
-        style={{
-          position: isFullscreen ? 'fixed' : 'relative',
-          top: 0, left: 0, right: 0,
-          zIndex: 200,
-          opacity: toolbarVisible ? 1 : 0,
-          transform: toolbarVisible ? 'translateY(0)' : 'translateY(-100%)',
-          transition: 'opacity 0.35s ease, transform 0.35s ease',
-          pointerEvents: toolbarVisible ? 'auto' : 'none',
-        }}
-      >
-        <div style={{
-          display: 'flex',
-          alignItems: 'center',
-          gap: 10,
-          padding: '0 16px',
-          height: 54,
-          background: 'rgba(10,12,18,0.93)',
-          backdropFilter: 'blur(28px)',
-          WebkitBackdropFilter: 'blur(28px)',
-          borderBottom: '1px solid rgba(255,255,255,0.07)',
-        }}>
-
-          {/* Logo / Title */}
-          <div style={{ display: 'flex', alignItems: 'center', gap: 10, flex: '1 1 auto', minWidth: 0 }}>
-            {/* TeknaRupa logo */}
+      <div id="pdf-root" ref={viewerRef}>
+        {/* ── Toolbar ── */}
+        <header
+          id="pdf-toolbar"
+          className="compact-mobile"
+          style={{
+            opacity: toolbarVisible ? 1 : 0,
+            transform: toolbarVisible ? 'translateY(0)' : 'translateY(-100%)',
+            pointerEvents: toolbarVisible ? 'auto' : 'none',
+          }}
+        >
+          {/* Logo + Brand */}
+          <div style={{ display: 'flex', alignItems: 'center', gap: 8, flexShrink: 0 }}>
             <img
               src="/logo.png"
               alt="TeknaRupa"
               style={{
-                width: 36, height: 36, borderRadius: 8, flexShrink: 0,
+                width: isMobile ? 30 : 34,
+                height: isMobile ? 30 : 34,
+                borderRadius: 7,
                 objectFit: 'contain',
                 background: 'white',
-                padding: 3,
+                padding: 2,
+                flexShrink: 0,
               }}
             />
-            <div style={{ minWidth: 0 }}>
-              <p style={{
-                fontSize: 13, fontWeight: 700, color: '#f0f2f7',
-                overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap',
-                maxWidth: 260, lineHeight: 1.3, letterSpacing: '-0.01em',
-              }}>
+            <div id="pdf-logo-text" style={{ minWidth: 0 }}>
+              <p style={{ fontSize: 13, fontWeight: 700, lineHeight: 1.2, letterSpacing: '-0.01em' }}>
                 <span style={{ color: '#3b82f6' }}>Tekna</span>
                 <span style={{ color: '#f97316' }}>Rupa</span>
               </p>
-              <p style={{ fontSize: 10, color: '#5a6478', letterSpacing: '0.03em' }}>Proposal Penawaran</p>
+              <p style={{ fontSize: 10, color: '#5a6478' }}>Proposal Penawaran</p>
             </div>
           </div>
 
-          {/* Separator */}
-          <Divider />
+          {/* Spacer */}
+          <div style={{ flex: 1 }} />
 
-          {/* Page Navigation */}
-          <div style={{ display: 'flex', alignItems: 'center', gap: 4 }}>
-            <ToolBtn onClick={() => setCurrentPage(p => Math.max(p - 1, 1))} disabled={currentPage <= 1} title="Halaman sebelumnya (←)">
+          {/* ── Navigasi Halaman ── */}
+          <div style={{ display: 'flex', alignItems: 'center', gap: 3 }}>
+            <ToolBtn
+              onClick={() => setCurrentPage(p => Math.max(p - 1, 1))}
+              disabled={currentPage <= 1}
+              title="Halaman sebelumnya"
+            >
               <IconChevronLeft />
             </ToolBtn>
 
-            <div style={{ display: 'flex', alignItems: 'center', gap: 5 }}>
+            <div style={{ display: 'flex', alignItems: 'center', gap: 4 }}>
               <input
                 value={pageInputVal}
                 onChange={e => setPageInputVal(e.target.value)}
                 onKeyDown={handlePageInput}
                 aria-label="Nomor halaman"
+                inputMode="numeric"
                 style={{
-                  width: 42, textAlign: 'center', fontSize: 12, fontWeight: 600,
+                  width: 36, textAlign: 'center', fontSize: 12, fontWeight: 600,
                   background: 'rgba(255,255,255,0.06)', color: '#f0f2f7',
                   border: '1px solid rgba(255,255,255,0.1)', borderRadius: 6,
-                  padding: '5px 4px', outline: 'none',
-                  transition: 'border-color 0.2s',
+                  padding: '4px 2px', outline: 'none',
                 }}
                 onFocus={e => (e.target.style.borderColor = '#6366f1')}
                 onBlur={e => (e.target.style.borderColor = 'rgba(255,255,255,0.1)')}
@@ -279,24 +316,28 @@ export default function PDFViewerPage() {
               </span>
             </div>
 
-            <ToolBtn onClick={() => setCurrentPage(p => Math.min(p + 1, totalPages))} disabled={currentPage >= totalPages} title="Halaman berikutnya (→)">
+            <ToolBtn
+              onClick={() => setCurrentPage(p => Math.min(p + 1, totalPages))}
+              disabled={currentPage >= totalPages}
+              title="Halaman berikutnya"
+            >
               <IconChevronRight />
             </ToolBtn>
           </div>
 
-          {/* Separator */}
-          <Divider />
+          {/* ── Separator (desktop only) ── */}
+          <div className="hide-mobile" style={{ width: 1, height: 26, background: 'rgba(255,255,255,0.07)', flexShrink: 0 }} />
 
-          {/* Zoom */}
-          <div style={{ display: 'flex', alignItems: 'center', gap: 4 }}>
+          {/* ── Zoom (desktop only) ── */}
+          <div className="hide-mobile" style={{ display: 'flex', alignItems: 'center', gap: 3 }}>
             <ToolBtn
               onClick={() => setZoom(z => {
-                const steps = ['50','75','100','125','150','200'];
-                const idx = steps.indexOf(z);
-                return idx > 0 ? steps[idx - 1] : z;
+                const s = ['50','75','100','125','150','200'];
+                const i = s.indexOf(z);
+                return i > 0 ? s[i - 1] : z;
               })}
               disabled={zoom === '50' || zoom === 'page' || zoom === 'page-width'}
-              title="Perkecil (-)"
+              title="Perkecil"
             >
               <IconZoomOut />
             </ToolBtn>
@@ -309,8 +350,8 @@ export default function PDFViewerPage() {
                 fontSize: 11, fontWeight: 600, color: '#f0f2f7',
                 background: 'rgba(255,255,255,0.06)',
                 border: '1px solid rgba(255,255,255,0.1)',
-                borderRadius: 6, padding: '5px 6px', cursor: 'pointer',
-                outline: 'none', minWidth: 92,
+                borderRadius: 6, padding: '4px 6px', cursor: 'pointer',
+                outline: 'none', minWidth: 90,
                 appearance: 'none', textAlign: 'center',
               }}
             >
@@ -325,96 +366,78 @@ export default function PDFViewerPage() {
 
             <ToolBtn
               onClick={() => setZoom(z => {
-                const steps = ['50','75','100','125','150','200'];
-                const idx = steps.indexOf(z);
-                return idx < steps.length - 1 ? steps[idx + 1] : z;
+                const s = ['50','75','100','125','150','200'];
+                const i = s.indexOf(z);
+                return i < s.length - 1 ? s[i + 1] : z;
               })}
               disabled={zoom === '200'}
-              title="Perbesar (+)"
+              title="Perbesar"
             >
               <IconZoomIn />
             </ToolBtn>
           </div>
 
+          {/* ── Separator ── */}
+          <div style={{ width: 1, height: 26, background: 'rgba(255,255,255,0.07)', flexShrink: 0 }} />
 
-          {/* Separator */}
-          <Divider />
+          {/* ── Aksi ── */}
+          <div style={{ display: 'flex', alignItems: 'center', gap: 2 }}>
+            {/* Rotate — sembunyikan di mobile sangat kecil */}
+            <div className="hide-sm">
+              <ToolBtn onClick={() => setRotation(r => (r + 90) % 360)} title="Putar 90°">
+                <IconRotateCW />
+              </ToolBtn>
+            </div>
 
-          {/* Actions */}
-          <div style={{ display: 'flex', alignItems: 'center', gap: 4 }}>
-            <ToolBtn onClick={() => setRotation(r => (r + 90) % 360)} title="Putar 90°">
-              <IconRotateCW />
-            </ToolBtn>
             <ToolBtn onClick={handleDownload} title="Unduh PDF">
               <IconDownload />
             </ToolBtn>
-            <ToolBtn onClick={toggleFullscreen} title={isFullscreen ? 'Keluar Fullscreen (Esc)' : 'Layar Penuh (F)'} accent>
-              {isFullscreen ? <IconExitFullscreen /> : <IconFullscreen />}
-            </ToolBtn>
+
+            {/* Fullscreen — hanya desktop (mobile tidak support requestFullscreen dengan baik) */}
+            <div className="hide-mobile">
+              <ToolBtn onClick={toggleFullscreen} title={isFullscreen ? 'Keluar Fullscreen' : 'Layar Penuh (F)'} accent>
+                {isFullscreen ? <IconExitFullscreen /> : <IconFullscreen />}
+              </ToolBtn>
+            </div>
           </div>
 
-          {/* Keyboard hint (only non-fullscreen) */}
-          {!isFullscreen && (
-            <div style={{
-              marginLeft: 'auto',
-              display: 'flex', alignItems: 'center', gap: 8,
-              flexShrink: 0,
-            }}>
-              {[['← →', 'halaman'], ['+  −', 'zoom'], ['F', 'fullscreen']].map(([k, l]) => (
-                <div key={k} style={{
-                  display: 'flex', alignItems: 'center', gap: 4,
-                  fontSize: 10, color: '#5a6478',
-                }}>
+          {/* Keyboard hints — desktop only */}
+          {!isFullscreen && !isMobile && (
+            <div className="hide-mobile" style={{ display: 'flex', alignItems: 'center', gap: 6, marginLeft: 4, flexShrink: 0 }}>
+              {[['← →', 'hal.'], ['+−', 'zoom'], ['F', 'full']].map(([k, l]) => (
+                <div key={k} style={{ display: 'flex', alignItems: 'center', gap: 3, fontSize: 10, color: '#5a6478' }}>
                   <kbd style={{
-                    background: 'rgba(255,255,255,0.07)',
-                    border: '1px solid rgba(255,255,255,0.12)',
-                    borderRadius: 4, padding: '1px 5px',
-                    fontFamily: 'monospace', fontSize: 10, color: '#8892a4',
+                    background: 'rgba(255,255,255,0.07)', border: '1px solid rgba(255,255,255,0.12)',
+                    borderRadius: 3, padding: '1px 4px', fontFamily: 'monospace', fontSize: 9, color: '#8892a4',
                   }}>{k}</kbd>
                   <span>{l}</span>
                 </div>
               ))}
             </div>
           )}
-        </div>
-      </header>
+        </header>
 
-      {/* ── PDF Iframe ── */}
-      <main style={{
-        flex: 1, position: 'relative', zIndex: 1,
-        overflow: 'hidden',
-        display: 'flex', alignItems: 'center', justifyContent: 'center',
-        background: '#111318',
-      }}>
-        <iframe
-          ref={iframeRef}
-          src={pdfSrc}
-          title={PDF_TITLE}
-          style={{
-            width: '100%',
-            height: '100%',
-            border: 'none',
-            display: 'block',
-            transform: rotation !== 0 ? `rotate(${rotation}deg)` : undefined,
-            transformOrigin: 'center center',
-            transition: 'transform 0.35s ease',
-          }}
-        />
-      </main>
-    </div>
+        {/* ── Area PDF ── */}
+        <main id="pdf-main">
+          <iframe
+            ref={iframeRef}
+            id="pdf-iframe"
+            src={pdfSrc}
+            title={PDF_TITLE}
+            allow="fullscreen"
+            style={{
+              transform: rotation !== 0 ? `rotate(${rotation}deg)` : undefined,
+              transformOrigin: 'center center',
+              transition: 'transform 0.35s ease',
+            }}
+          />
+        </main>
+      </div>
+    </>
   );
 }
 
-// ─── Helper Components ────────────────────────────────────────────────────────
-
-function Divider() {
-  return (
-    <div style={{
-      width: 1, height: 28, flexShrink: 0,
-      background: 'rgba(255,255,255,0.07)',
-    }} />
-  );
-}
+// ─── ToolBtn ──────────────────────────────────────────────────────────────────
 
 function ToolBtn({
   children, onClick, disabled, title, accent,
@@ -429,7 +452,6 @@ function ToolBtn({
 
   const bg    = disabled ? 'transparent' : hov && accent ? 'rgba(99,102,241,0.25)' : hov ? 'rgba(255,255,255,0.08)' : 'transparent';
   const color = disabled ? '#374151' : accent ? (hov ? '#c7d2fe' : '#818cf8') : hov ? '#f0f2f7' : '#8892a4';
-  const border = accent && hov ? '1px solid rgba(99,102,241,0.4)' : '1px solid transparent';
 
   return (
     <button
@@ -441,11 +463,15 @@ function ToolBtn({
       style={{
         width: 32, height: 32, borderRadius: 7,
         display: 'flex', alignItems: 'center', justifyContent: 'center',
-        background: bg, color, border,
+        background: bg, color,
+        border: accent && hov ? '1px solid rgba(99,102,241,0.4)' : '1px solid transparent',
         cursor: disabled ? 'not-allowed' : 'pointer',
         transition: 'all 0.15s ease',
         flexShrink: 0,
         outline: 'none',
+        // Touch-friendly tap area
+        WebkitTapHighlightColor: 'transparent',
+        touchAction: 'manipulation',
       }}
     >
       {children}

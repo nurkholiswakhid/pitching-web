@@ -6,7 +6,8 @@
     "dev": "next dev",
     "build": "next build",
     "start": "next start",
-    "lint": "eslint"
+    "lint": "eslint",
+    "postinstall": "node -e \"const{copyFileSync,mkdirSync,existsSync}=require('fs');mkdirSync('public',{recursive:true});if(existsSync('node_modules/pdfjs-dist/build/pdf.worker.min.mjs')){copyFileSync('node_modules/pdfjs-dist/build/pdf.worker.min.mjs','public/pdf.worker.min.mjs');console.log('PDF worker copied to public/');}\""
   },
   "dependencies": {
     "next": "16.2.10",

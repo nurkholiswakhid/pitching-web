@@ -5,8 +5,8 @@ import { Document, Page, pdfjs } from 'react-pdf';
 import 'react-pdf/dist/Page/AnnotationLayer.css';
 import 'react-pdf/dist/Page/TextLayer.css';
 
-// ── Setup PDF.js worker (CDN — no bundling needed, v5 compatible)
-pdfjs.GlobalWorkerOptions.workerSrc = `https://cdnjs.cloudflare.com/ajax/libs/pdf.js/${pdfjs.version}/pdf.worker.min.mjs`;
+// ── Setup PDF.js worker — file lokal di /public agar bisa bekerja di localhost & semua device
+pdfjs.GlobalWorkerOptions.workerSrc = '/pdf.worker.min.mjs';
 
 // ─── Constants ────────────────────────────────────────────────────────────────
 const PDF_URL   = '/proposal.pdf';

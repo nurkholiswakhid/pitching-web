@@ -9,7 +9,7 @@ const inter = Inter({
 });
 
 export const metadata: Metadata = {
-  title: "TeknaRupa — Proposal Penawaran",
+  title: "TeknaRupa - Proposal Penawaran",
   description: "Proposal Penawaran Sistem Informasi Sekolah oleh TeknaRupa Digital Creative Solutions.",
   icons: {
     icon: [
